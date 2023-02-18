@@ -7,7 +7,11 @@ import com.happysnaker.pojo.Order;
 import com.happysnaker.pojo.OrderMessage;
 import com.happysnaker.service.OrderService;
 import com.happysnaker.utils.VerifyUtils;
+import org.redisson.Redisson;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,18 +43,19 @@ public class PessimisticPlaceOrderStrategy extends AbstractPlaceOrderStrategy {
         return addUserOrder(order);
     }
 
-    static Map<Long, ReentrantLock> lockMap = new ConcurrentHashMap<>();
+    @Autowired
+    RedissonClient redisson;
 
-    private synchronized ReentrantLock getLock(int did, int sid) {
+    private synchronized RLock getLock(int did, int sid) {
         long key = (did << 32) | sid;
-        lockMap.putIfAbsent(key, new ReentrantLock());
-        return lockMap.get(key);
+        return redisson.getLock(String.valueOf(key));
     }
 
     /**
      * <p>这是原先的代码，增加了检查扣减库存的逻辑</p>
-     * <p>现在重新来看，如果查询加了 FOR UPDATE 语句，根本不需要对商品 ID 上锁，这是因为我们标注了此方法开启事务，而数据库查询库存语句被标注为 FOR UPDATE，这意味着查询也会上写锁，而在同一个事务内锁是不会被释放的，其他事务都无法获取到锁</p>
+     * <p>在单机模式下，如果查询加了 FOR UPDATE 语句，根本不需要对商品 ID 上锁，这是因为我们标注了此方法开启事务，而数据库查询库存语句被标注为 FOR UPDATE，这意味着查询也会上写锁，而在同一个事务内锁是不会被释放的，其他事务都无法获取到锁</p>
      * <p>采用 FOR UPDATE 是在数据库层面做悲观锁，这里查询单个菜品库存没有加 FOR UPDATE，因此我们需要自己加锁</p>
+     * <p>在多机模式下，需要引入 redisson 分布式锁</p>
      */
     @Transactional(rollbackFor = Exception.class)
     public Map addUserOrder(Order order) throws OrderAddException, ReadWriterLockException {

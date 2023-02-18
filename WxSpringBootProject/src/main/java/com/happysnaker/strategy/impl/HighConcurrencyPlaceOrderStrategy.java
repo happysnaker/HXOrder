@@ -8,22 +8,22 @@ import com.happysnaker.pojo.Order;
 import com.happysnaker.pojo.OrderMessage;
 import com.happysnaker.service.OrderService;
 import com.happysnaker.utils.VerifyUtils;
+import io.swagger.models.auth.In;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * <p>高并发秒杀场景下的架构</p>
- * <P>首先提前用 Redis 缓存菜品库存，下单时先查询 Redis 缓存是否足够，如果足够则扣减 Redis 缓存，一旦扣减成功，立即返回。后续的工作交由消息队列做，在消息队列中，利用数据库乐观锁扣减库存，完成后续工作，如果消息队列工作失败，除了数据库回滚之外，他还必须对 Redis 中架构进行补偿</P>
- * <p>在高并发期间，管理员不得更改菜品库存，这可能造成缓存不一致</p>
+ * <P>首先提前用 Redis 缓存菜品库存，下单时先查询 Redis 缓存是否足够，如果足够则扣减 Redis 缓存，一旦扣减成功，立即返回。
+ * 如果不足则进行内存标记，再次访问直接返回，
+ * 后续的工作交由消息队列做，在消息队列中，利用数据库乐观锁扣减库存，完成后续工作，如果消息队列工作失败，除了数据库回滚之外，他还必须对 Redis 中架构进行补偿</P>
+ * <p>在高并发期间，管理员不得更改菜品库存，这可能造成缓存不一致，考虑可以使用一个定时任务或者 api 进行缓存预热，并清理内存标记，暂未实现</p>
  * @author Happysnaker
  * @description
  * @date 2022/3/14
@@ -34,6 +34,10 @@ import java.util.stream.Collectors;
 @Configuration
 @EnableRabbit
 public class HighConcurrencyPlaceOrderStrategy extends AbstractPlaceOrderStrategy {
+    /**
+     * 内存标记，在高并发期间不得清除，高并发后需要手动清除，这里未实现清除逻辑
+     */
+    private Map<Integer, BitSet> map = new HashMap<>();
 
     /**
      * 刷新 Redis 缓存，准备进入高并发模式
@@ -53,9 +57,24 @@ public class HighConcurrencyPlaceOrderStrategy extends AbstractPlaceOrderStrateg
 
     public boolean checkStock(Map<Integer, Integer> m, int storeId) {
         try {
+            // 被标记了，直接返回
+//            for (var it : m.entrySet()) {
+//                int id = it.getKey();
+//                if (map.get(storeId) != null && map.get(storeId).get(id)) {
+//                    return false;
+//                }
+//            }
+
+
             for (var it : m.entrySet()) {
                 int id = it.getKey(), stock = it.getValue();
-                if ((int) redisManager.getForHash(RedisCacheManager.getDishStockCacheKey(storeId), id) < stock) {
+                int nowStock = (int) redisManager.getForHash(RedisCacheManager.getDishStockCacheKey(storeId), id);
+                if (nowStock == 0) {
+                    // 内存标记，这里暂时没实现删除的逻辑，因此这里暂时不实现
+//                    map.putIfAbsent(storeId, new BitSet());
+//                    map.get(storeId).set(id);
+                }
+                if (nowStock < stock) {
                     return false;
                 }
             }

@@ -204,23 +204,9 @@ public class RedisCacheManager {
         if (hasKey(getDishStockCacheKey(storeId))) {
             redis.delete(getDishStockCacheKey(storeId));
         }
-//        Channel channel = rabbit.getConnectionFactory().createConnection().createChannel(false);
-//        try {
-//            channel.exchangeDeclare(OrderRabbitMqConfig.ORDER_EXCHANGE, "direct", true, false, null);
-//            AMQP.Queue.DeclareOk declareOk = channel.queueDeclarePassive(OrderRabbitMqConfig.ORDER_ADD_DEAD_QUEUE);
-//            while (declareOk.getMessageCount() != 0) {
-//                System.out.println("消息队列非空，不安全，等待消费者为 0");
-//                Thread.sleep(500);
-//            }
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//        }
         for (Dish dish : dishes) {
             setForHash(getDishStockCacheKey(storeId), dish.getId(), dish.getStock());
         }
-
     }
 
 
